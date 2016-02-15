@@ -96,6 +96,8 @@ static NSString *describe_options(NSKeyValueObservingOptions options)
   SEL _action;
   void *_context;
   FBKVONotificationBlock _block;
+  BOOL _registered;
+  BOOL _unregisteredBeforeRegistered;
 }
 
 - (instancetype)initWithController:(FBKVOController *)controller keyPath:(NSString *)keyPath options:(NSKeyValueObservingOptions)options block:(FBKVONotificationBlock)block action:(SEL)action context:(void *)context
@@ -268,6 +270,11 @@ static NSString *describe_options(NSKeyValueObservingOptions options)
   
   // add observer
   [object addObserver:self forKeyPath:info->_keyPath options:info->_options context:(void *)info];
+
+  info->_registered = YES;
+  if (info->_unregisteredBeforeRegistered) {
+      [self unobserve:object info:info];
+  }
 }
 
 - (void)unobserve:(id)object info:(_FBKVOInfo *)info
@@ -275,12 +282,17 @@ static NSString *describe_options(NSKeyValueObservingOptions options)
   if (nil == info) {
     return;
   }
-  
+
+  if (!info->_registered) {
+      info->_unregisteredBeforeRegistered = YES;
+      return;
+  }
+
   // unregister info
   OSSpinLockLock(&_lock);
   [_infos removeObject:info];
   OSSpinLockUnlock(&_lock);
-  
+
   // remove observer
   [object removeObserver:self forKeyPath:info->_keyPath context:(void *)info];
 }
@@ -294,13 +306,19 @@ static NSString *describe_options(NSKeyValueObservingOptions options)
   // unregister info
   OSSpinLockLock(&_lock);
   for (_FBKVOInfo *info in infos) {
-    [_infos removeObject:info];
+    if (info->_registered) {
+      [_infos removeObject:info];
+    } else {
+      info->_unregisteredBeforeRegistered = YES;
+    }
   }
   OSSpinLockUnlock(&_lock);
   
   // remove observer
   for (_FBKVOInfo *info in infos) {
-    [object removeObserver:self forKeyPath:info->_keyPath context:(void *)info];
+    if (info->_registered) {
+      [object removeObserver:self forKeyPath:info->_keyPath context:(void *)info];
+    }
   }
 }
 
